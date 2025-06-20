@@ -3,19 +3,19 @@ const MessagesModel = require("../models/messages-model");
 const AllTopicsModel = require("../models/all-mqtt-messages");
 const Supervisor = require("../models/supervisor-model");
 const Employee = require("../models/employee-model");
-const Backup = require("../models/backup-model");
 const sendMail = require("../utils/mail");
 const NodeCache = require("node-cache");
 const { EventEmitter } = require("events");
 
 // Constants for configuration
 const BATCH_SIZE = 10;
-const BATCH_INTERVAL = 10000; // Updated to 10 seconds
+const BATCH_INTERVAL = 100; // Reduced to 100ms for faster batch processing
 const MAX_QUEUE_SIZE = 100;
 const MAX_MAIL_RETRIES = 3;
 const MAIL_RETRY_DELAY = 1000;
 const THRESHOLD_COOLDOWN_PERIOD = 30000;
 
+// Email Queue Class (unchanged)
 class EmailQueue extends EventEmitter {
   constructor() {
     super();
@@ -102,10 +102,10 @@ class EmailQueue extends EventEmitter {
   }
 }
 
+// MQTT Handler Class
 class MQTTHandler {
   constructor() {
     this.messageQueue = new Map();
-    this.backupMessageQueue = new Map();
     this.latestMessages = new Map();
     this.subscribedTopics = new Set();
     this.thresholdStates = new Map();
@@ -132,15 +132,13 @@ class MQTTHandler {
 
   initializeClient() {
     const options = {
-      host: "3.109.128.123",
+      host: '192.168.1.171',
       port: 1883,
-      protocol: "mqtt",
+      protocol: 'mqtt',
       keepalive: 30,
       reconnectPeriod: 1000,
       clean: true,
       connectTimeout: 10000,
-      username: "Sarayu",
-      password: "IOTteam@123",
     };
 
     const client = mqtt.connect(options);
@@ -175,59 +173,33 @@ class MQTTHandler {
       if (this.processingBatch) return;
       try {
         this.processingBatch = true;
-        // Process backup messages first
-        for (const topic of this.backupMessageQueue.keys()) {
-          const baseTopic = topic.replace('|backup', '');
-          await this.processBackupBatch(topic, baseTopic);
-        }
-        // Process regular messages
         await this.processBatch();
-      } catch (error) {
-        console.error("Error in periodic batch processing:", error);
       } finally {
         this.processingBatch = false;
       }
     }, BATCH_INTERVAL);
   }
 
-  parsePayload(payload, isBackupTopic = false) {
+  parsePayload(payload) {
     try {
       const payloadStr = typeof payload === "string" ? payload : payload.toString();
 
-      if (isBackupTopic) {
-        const parsed = JSON.parse(payloadStr);
-        if (!Array.isArray(parsed) || parsed.length < 3) {
-          throw new Error("Invalid backup payload format");
-        }
-
-        const initialTimestampStr = parsed[0].replace(/:(\d{3})\+/, ".$1+");
-        const initialTimestamp = new Date(initialTimestampStr);
-        const intervalSeconds = parseInt(parsed[1], 10);
-        const values = parsed.slice(2).map((val) => parseFloat(val));
-
-        if (isNaN(initialTimestamp.getTime()) || isNaN(intervalSeconds) || values.some(isNaN)) {
-          throw new Error("Invalid timestamp, interval, or values in backup payload");
-        }
-
-        return { initialTimestamp, intervalSeconds, values };
-      } else {
-        try {
-          const jsonParsed = JSON.parse(payloadStr);
-          if (jsonParsed && typeof jsonParsed === "object") {
-            if (jsonParsed.message && jsonParsed.message.message !== undefined) {
-              return jsonParsed.message.message;
-            }
-            if (jsonParsed.message !== undefined) {
-              const numValue = parseFloat(jsonParsed.message);
-              return !isNaN(numValue) ? numValue : jsonParsed.message;
-            }
+      try {
+        const jsonParsed = JSON.parse(payloadStr);
+        if (jsonParsed && typeof jsonParsed === "object") {
+          if (jsonParsed.message && jsonParsed.message.message !== undefined) {
+            return jsonParsed.message.message;
           }
-          const numValue = parseFloat(jsonParsed);
-          return !isNaN(numValue) ? numValue : null;
-        } catch (jsonError) {
-          const numValue = parseFloat(payloadStr);
-          return !isNaN(numValue) ? numValue : null;
+          if (jsonParsed.message !== undefined) {
+            const numValue = parseFloat(jsonParsed.message);
+            return !isNaN(numValue) ? numValue : jsonParsed.message;
+          }
         }
+        const numValue = parseFloat(jsonParsed);
+        return !isNaN(numValue) ? numValue : null;
+      } catch (jsonError) {
+        const numValue = parseFloat(payloadStr);
+        return !isNaN(numValue) ? numValue : null;
       }
     } catch (error) {
       console.error("Payload parsing error:", error);
@@ -235,39 +207,35 @@ class MQTTHandler {
     }
   }
 
-  hasSingleForwardSlash(topic) {
-    const slashCount = (topic.match(/\//g) || []).length;
-    return slashCount === 1;
-  }
-
   async handleMessage(topic, payload) {
     try {
-      const isBackupTopic = topic.endsWith("|backup");
-      console.log("Received message on topic:", topic, "Payload:", payload.toString());
-
-      // Always update the latest message for all topics
-      this.updateLatestMessage(topic, payload.toString());
-
-      // For topics with a single forward slash (e.g., company/gateway), skip all operations
-      // except updating the latest message (already done above)
-      if (this.hasSingleForwardSlash(topic)) {
-        return;
-      }
-
-      const parsedData = this.parsePayload(payload, isBackupTopic);
-
-      if (parsedData === null) {
+      const value = this.parsePayload(payload);
+      if (value === null) {
         console.warn(`Unable to parse payload for topic ${topic}:`, payload.toString());
         return;
       }
 
+      const timestamp = new Date();
+
+      // Save the message to the database immediately
+      await MessagesModel.create({
+        topic,
+        message: value.toString(),
+        timestamp,
+      });
+
+      // Update the latest message
+      this.updateLatestMessage(topic, payload.toString());
+
+      // Queue for batch processing to optimize future writes
       if (payload.length < 100) {
-        if (isBackupTopic) {
-          const baseTopic = topic.replace(/\|backup$/, "");
-          this.queueBackupMessages(topic, baseTopic, parsedData);
-        } else {
-          this.queueMessage(topic, parsedData);
-          await this.checkThresholds(topic, parsedData);
+        this.queueMessage(topic, value, timestamp);
+        await this.checkThresholds(topic, value);
+
+        // Process the batch immediately if the queue reaches BATCH_SIZE
+        const messages = this.messageQueue.get(topic) || [];
+        if (messages.length >= BATCH_SIZE) {
+          await this.processBatch();
         }
       }
     } catch (error) {
@@ -283,108 +251,37 @@ class MQTTHandler {
     this.latestMessages.set(topic, messageData);
   }
 
-  queueMessage(topic, value) {
+  queueMessage(topic, value, timestamp) {
     if (!this.messageQueue.has(topic)) {
       this.messageQueue.set(topic, []);
     }
     const messages = this.messageQueue.get(topic);
-    messages.push({ value, timestamp: Date.now() });
+    messages.push({ value, timestamp });
 
     if (messages.length > MAX_QUEUE_SIZE) {
       messages.splice(0, messages.length - MAX_QUEUE_SIZE);
     }
   }
 
-  queueBackupMessages(topic, baseTopic, { initialTimestamp, intervalSeconds, values }) {
-    if (!this.backupMessageQueue.has(topic)) {
-      this.backupMessageQueue.set(topic, []);
-    }
-    if (!this.messageQueue.has(baseTopic)) {
-      this.messageQueue.set(baseTopic, []);
-    }
-
-    const backupMessages = this.backupMessageQueue.get(topic);
-    const regularMessages = this.messageQueue.get(baseTopic);
-
-    values.forEach((value, index) => {
-      const timestamp = new Date(initialTimestamp.getTime() + index * intervalSeconds * 1000);
-      backupMessages.push({ value, timestamp });
-      regularMessages.push({ value, timestamp: timestamp.getTime() });
-    });
-
-    if (backupMessages.length > MAX_QUEUE_SIZE) {
-      backupMessages.splice(0, backupMessages.length - MAX_QUEUE_SIZE);
-    }
-    if (regularMessages.length > MAX_QUEUE_SIZE) {
-      regularMessages.splice(0, regularMessages.length - MAX_QUEUE_SIZE);
-    }
-  }
-
-  async processBackupBatch(topic, baseTopic) {
-    const backupMessages = this.backupMessageQueue.get(topic) || [];
-    if (backupMessages.length === 0) return;
-
-    const batch = backupMessages.splice(0, BATCH_SIZE);
-    if (batch.length > 0) {
-      try {
-        // Save to Backup model (with |backup suffix)
-        const backupDocs = batch.map(({ value, timestamp }) => ({
-          message: parseFloat(value),
-          timestamp,
-        }));
-        await Backup.updateOne(
-          { topic },
-          { $push: { messages: { $each: backupDocs } } },
-          { upsert: true }
-        );
-        console.log(`Saved ${backupDocs.length} messages to Backup model for topic ${topic}`);
-
-        // Save to Messages model (without |backup suffix)
-        await MessagesModel.insertMany(
-          batch.map(({ value, timestamp }) => ({
-            topic: baseTopic,
-            message: value.toString(),
-            timestamp,
-          }))
-        );
-        console.log(`Saved ${batch.length} messages to Messages model for topic ${baseTopic}`);
-      } catch (error) {
-        console.error(`Failed to save backup messages for topic ${topic}:`, error);
-      }
-    }
-  }
-
   async processBatch() {
-    const regularBatchOperations = [];
+    const batchOperations = [];
 
     for (const [topic, messages] of this.messageQueue.entries()) {
       if (messages.length === 0) continue;
 
-      // Skip storing if the topic has a single forward slash
-      if (this.hasSingleForwardSlash(topic)) {
-        messages.splice(0, messages.length); // Clear the queue without storing
-        continue;
-      }
-
       const batch = messages.splice(0, BATCH_SIZE);
       if (batch.length > 0) {
-        regularBatchOperations.push(
-          MessagesModel.insertMany(
-            batch.map(({ value, timestamp }) => ({
-              topic,
-              message: value.toString(),
-              timestamp: new Date(timestamp),
-            }))
-          )
-        );
+        // Since messages are already saved, this batch processing can be used for other purposes
+        // (e.g., logging, analytics, or optimizing future writes if needed)
+        console.log(`Processed batch of ${batch.length} messages for topic ${topic}`);
       }
     }
 
-    if (regularBatchOperations.length > 0) {
-      await Promise.allSettled(regularBatchOperations).then((results) => {
+    if (batchOperations.length > 0) {
+      await Promise.allSettled(batchOperations).then((results) => {
         results.forEach((result, index) => {
           if (result.status === "rejected") {
-            console.error(`Regular batch operation ${index} failed:`, result.reason);
+            console.error(`Batch operation ${index} failed:`, result.reason);
           }
         });
       });
@@ -525,11 +422,7 @@ ${
         } else {
           console.log(`Subscribed to topic: ${topic}`);
           this.subscribedTopics.add(topic);
-          if (topic.endsWith("|backup")) {
-            this.backupMessageQueue.set(topic, []);
-          } else if (!this.hasSingleForwardSlash(topic)) {
-            this.messageQueue.set(topic, []);
-          }
+          this.messageQueue.set(topic, []);
         }
       });
     }
@@ -544,7 +437,6 @@ ${
           console.log(`Unsubscribed from topic: ${topic}`);
           this.subscribedTopics.delete(topic);
           this.messageQueue.delete(topic);
-          this.backupMessageQueue.delete(topic);
           this.latestMessages.delete(topic);
           this.thresholdStates.delete(topic);
         }

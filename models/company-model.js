@@ -14,10 +14,14 @@ const companySchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    label: {
+      type: String,
+      required: false,
+    },
     address: {
       type: String,
       required: true,
-    },
+    }
   },
   {
     timestamps: true,

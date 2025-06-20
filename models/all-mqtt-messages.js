@@ -16,7 +16,7 @@ const topicSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-  },  
+  },
   thresholds: {
     type: [thresholdSchema],
     default: [],
@@ -24,6 +24,6 @@ const topicSchema = new mongoose.Schema({
 });
 
 // Create the Topic model
-const AllTopicsModel = mongoose.model("Topic", topicSchema);
+const AllTopicsModel = mongoose.model("TopicThreshold", topicSchema);
 
 module.exports = AllTopicsModel;

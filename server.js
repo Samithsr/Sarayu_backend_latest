@@ -10,6 +10,7 @@ const dotenv = require("dotenv");
 const authRoute = require("./routers/auth-router");
 const supportmailRoute = require("./routers/supportmail-router");
 const mqttRoutes = require("./routers/mqttRoutes");
+const backupdbRoute = require("./routers/backupdb-route");
 
 // Load environment variables
 dotenv.config({ path: "./.env" });
@@ -34,11 +35,17 @@ const logger = winston.createLogger({
 app.use(express.json());
 app.use(fileupload());
 app.use(express.urlencoded({ extended: false }));
-app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "PATCH"] }));
+app.use(cors({ 
+  origin: "*", 
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+}));
 app.use(cookieParser());
 
-// Logging
+// Increase request timeout and enable chunked responses
 app.use((req, res, next) => {
+  req.setTimeout(600000); // 10-minute timeout
+  res.setTimeout(600000); // 10-minute timeout
+  res.flush = res.flush || (() => {}); // Ensure flush is available
   logger.info(`Requested to: ${req.url}`, {
     method: req.method,
     body: req.body,
@@ -50,6 +57,7 @@ app.use((req, res, next) => {
 app.use("/api/v1/auth", authRoute);
 app.use("/api/v1/supportmail", supportmailRoute);
 app.use("/api/v1/mqtt", mqttRoutes);
+app.use("/api/v1/backupdb", backupdbRoute);
 
 // Error handling
 app.use(errorHandler);

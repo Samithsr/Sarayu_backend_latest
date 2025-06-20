@@ -4,7 +4,7 @@ const SupportMail = require("./models/supportmail-model");
 const Admin = require("./models/admin-model");
 const dotenv = require("dotenv");
 const fs = require("fs");
-const MqttMessage = require('./models/mqtt-message-model')
+const MqttMessage = require('./models/topics-model')
 
 dotenv.config({ path: "./env/config.env" });
 
@@ -12,7 +12,7 @@ dotenv.config({ path: "./env/config.env" });
 // const support_data = JSON.parse(
 //   fs.readFileSync("./data/support-data.json", "utf-8")
 // );
-const admin_data = JSON.parse(
+const user_data = JSON.parse(
   fs.readFileSync("./data/admin-data.json", "utf-8")
 );
 // const topics_data = JSON.parse(
@@ -25,8 +25,8 @@ const insertData = async () => {
   try {
     // await User.create(user_data);
     // await SupportMail.create(support_data);
-    // await Admin.create(admin_data);
-    await MqttMessage.create(topics_data)
+    await Admin.create(user_data);
+    // await MqttMessage.create(topics_data)
     console.log("Data insertion successful!");
   } catch (error) {
     console.error("Error inserting data:", error.message);

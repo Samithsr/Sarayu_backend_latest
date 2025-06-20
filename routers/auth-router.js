@@ -65,7 +65,8 @@ const {
   addFavoriteManager,
   removeFavoriteManager,
   addGraphWatchListManager,
-  removeGraphWatchListManager
+  removeGraphWatchListManager,
+  getAllUserTopics
 } = require("../controllers/auth-controller");
 const router = express.Router();
 
@@ -180,6 +181,8 @@ router.route(`/layoutassign/manager/:id`).put(assignlayoutToManager);
 router.put("/digitalmeter/employee/:id", assignDigitalMeterToEmployee);
 router.put("/digitalmeter/supervisor/:id", assignDigitalMeterToSupervisor);
 router.put("/digitalmeter/manager/:id", assignDigitalMeterToManager);
+
+router.get("/getusertopics/:id", getAllUserTopics)
 
 // sample way to send body
 // {

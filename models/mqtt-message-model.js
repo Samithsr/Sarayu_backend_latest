@@ -7,8 +7,7 @@ const messageSchema = new mongoose.Schema({
 });
 
 const mqttMessageSchema = new mongoose.Schema({
-  topic: { type: String, required: true, unique: true, index: true }, // Index on topic field,
-  label : {type :String , required : false,index : true},
+  topic: { type: String, required: true, unique: true, index: true }, // Index on topic field
   messages: [messageSchema], // Indexes inside subdocuments are not automatically created
 });
 

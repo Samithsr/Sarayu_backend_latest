@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "concurrently \"nodemon server.js\" \"nodemon socketServer.js\""
+    "dev": "concurrently \"nodemon --max-old-space-size=8192 server.js\" \"nodemon socketServer.js\""
   },
   "keywords": [],
   "author": "",
@@ -16,6 +16,7 @@
     "body-parser": "^1.20.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
+    "csv-stringify": "^6.5.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-fileupload": "^1.5.0",

@@ -50,7 +50,7 @@ const adminLogin = asyncHandler(async (req, res, next) => {
   });
 });
 const createCompany = asyncHandler(async (req, res, next) => {
-  const { name, email, phonenumber, address } = req.body;
+  const { name, email, phonenumber, address , label} = req.body;
   const company = await Company.findOne({ name });
   if (company) {
     return next(new ErrorResponse("Company already exists!", 409));
@@ -322,13 +322,15 @@ const loginAsEmployee = asyncHandler(async (req, res, next) => {
 //create a employee
 const createEmployee = asyncHandler(async (req, res, next) => {
   const { companyId, supervisorId } = req.params;
-  const { name, email, password, phonenumber, mqttTopic } = req.body;
+  const { name, email, password, phonenumber, mqttTopic , headerOne , headerTwo } = req.body;
   const employee = await Employee.create({
     name,
     email,
     password,
     phonenumber,
     mqttTopic,
+    headerOne , 
+    headerTwo,
     company: companyId,
     supervisor: supervisorId,
   });
@@ -340,13 +342,15 @@ const createEmployee = asyncHandler(async (req, res, next) => {
 
 const createEmployeeWithoutSupervisor = asyncHandler(async (req, res, next) => {
   const { companyId } = req.params;
-  const { name, email, password, phonenumber, mqttTopic } = req.body;
+  const { name, email, password, phonenumber, mqttTopic, headerOne, headerTwo } = req.body;
   const employee = await Employee.create({
     name,
     email,
     password,
     phonenumber,
     mqttTopic,
+    headerOne, 
+    headerTwo,
     company: companyId,
   });
   res.status(201).json({
@@ -385,7 +389,7 @@ const getSinlgeSupervisor = asyncHandler(async (req, res, next) => {
   const { id } = req.params;
   const supervisor = await Supervisor.findById(id)
     .populate("company")
-    .populate("manager");
+    .populate("employees")
   if (!supervisor) {
     return next(new ErrorResponse(`No supervisor found with id ${id}`, 404));
   }
@@ -1291,6 +1295,7 @@ const assignDigitalMeterToManager = async (req, res) => {
 //to add or to remove the suscribed topics
 const subscribedTopics = asyncHandler(async (req, res) => {
   const { topic } = req.body;
+  console.log("ajhsdvkjasdvjasvdjasd : ",topic);
   const foundTopic = await SubscribedTopic.findOne({ topic });
   if (!foundTopic) {
     await SubscribedTopic.create({ topic });
@@ -1361,7 +1366,46 @@ const assignlayoutToManager = asyncHandler(async (req, res, next) => {
   res.status(200).json({ success: true, data: [] });
 });
 
+const getAllUserTopics = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 4;
+    const skip = (page - 1) * limit;
+
+    const employee = await Employee.findById(id, { _id: 0, topics: 1 });
+
+    if (!employee || !employee.topics) {
+      return res.status(404).json({
+        success: false,
+        message: "No topics found for this user",
+      });
+    }
+
+    const allTopics = employee.topics;
+    const totalTopics = allTopics.length;
+
+    const paginatedTopics = allTopics.slice(skip, skip + limit);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        topics: paginatedTopics,
+        totalTopics: totalTopics,
+        currentPage: page,
+        totalPages: Math.ceil(totalTopics / limit),
+      },
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
+  getAllUserTopics,
   login,
   createCompany,
   deleteCompany,

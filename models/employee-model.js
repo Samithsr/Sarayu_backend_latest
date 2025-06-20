@@ -47,6 +47,14 @@ const employeeSchema = new mongoose.Schema(
       type: String,
       default: "layout1",
     },
+    headerOne : {
+      type : "String",
+      required : true
+    },
+    headerTwo : {
+      type : "String",
+      required : false
+    },
     assignedDigitalMeters: {
       type: [
         {
